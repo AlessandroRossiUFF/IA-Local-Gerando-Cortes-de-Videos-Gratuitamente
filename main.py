@@ -9,13 +9,13 @@ import requests
 # =========================
 # CONFIGURAÇÕES
 # =========================
-VIDEO_URL = "https://www.youtube.com/watch?v=mjpOUbIDs18" # ESCOLHA O SEU VIDEO LONGO
+VIDEO_URL = "https://www.youtube.com/watch?v=QGK79hFi8wo&t=7s" # ESCOLHA O SEU VIDEO LONGO
 OUTPUT_DIR = "videos"
 BLOCK_DURATION = 600 #
 OLLAMA_MODEL = "llama3:8b"  # Ex: llama3:70b ou mistral
 OLLAMA_URL = "http://localhost:11434/api/generate"
 PLATFORMS = ["shorts"]
-MIN_DURATION = 45
+MIN_DURATION = 30
 MAX_DURATION = 300
 
 # =========================

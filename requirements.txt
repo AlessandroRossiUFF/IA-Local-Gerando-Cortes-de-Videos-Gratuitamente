@@ -1,0 +1,16 @@
+git+https://github.com/openai/whisper.git
+yt-dlp>=2024.4.9
+openai-whisper
+pydub
+ffmpeg-python
+numpy
+torch>=2.0.0
+tqdm
+requests
+fuzzywuzzy
+python-Levenshtein
+nltk
+scikit-learn
+transformers
+sentencepiece
+pyyaml

@@ -1,3 +1,4 @@
+# INSIRA SUA PRÓPRIA CHAVE DE API
 import os
 import subprocess
 import yt_dlp
@@ -9,20 +10,57 @@ import requests
 # =========================
 # CONFIGURAÇÕES
 # =========================
-VIDEO_URL = "https://www.youtube.com/watch?v=QGK79hFi8wo&t=7s" # ESCOLHA O SEU VIDEO LONGO
+VIDEO_URL = "https://www.youtube.com/watch?v=Iwe8VvZD3eQ"  # ESCOLHA O SEU VIDEO LONGO
 OUTPUT_DIR = "videos"
-BLOCK_DURATION = 600 #
-OLLAMA_MODEL = "llama3:8b"  # Ex: llama3:70b ou mistral
-OLLAMA_URL = "http://localhost:11434/api/generate"
+BLOCK_DURATION = 600
 PLATFORMS = ["shorts"]
 MIN_DURATION = 30
 MAX_DURATION = 300
+
+# Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or "INSERT-YOUR-API-KEY"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
 
 # =========================
 # UTILITÁRIAS
 # =========================
 def slugify(text):
     return re.sub(r'[^\w\s-]', '', text.lower()).strip().replace(' ', '_')[:50]
+
+def gemini_generate_content(prompt):
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [
+            {"parts": [{"text": prompt}]}
+        ]
+    }
+    resp = requests.post(GEMINI_URL, headers=headers, json=data)
+    resp.raise_for_status()
+    return resp.json()['candidates'][0]['content']['parts'][0]['text']
+
+def gerar_titulo_gemini(texto_corte):
+    prompt = f"""
+Dado o texto a seguir, gere um título curto, chamativo e descritivo para um corte de vídeo.
+O título deve obrigatoriamente usar palavras, frases ou ideias presentes no texto do corte.
+Exemplo: se o corte fala sobre "como fazer bolo de cenoura", o título deve conter "bolo de cenoura" ou similar.
+Evite títulos genéricos como "Corte", "Vídeo", "Trecho", "Parte", "Clip" ou similares. Seja fiel ao conteúdo do texto.
+
+Texto do corte:
+\"\"\"{texto_corte}\"\"\"
+Título:
+"""
+    try:
+        output = gemini_generate_content(prompt)
+        for line in output.strip().split('\n'):
+            titulo = line.strip()
+            if titulo and not any(g in titulo.lower() for g in ["corte", "vídeo", "trecho", "parte", "clip"]):
+                return titulo
+        palavras = texto_corte.strip().split()
+        return " ".join(palavras[:8]) + ("..." if len(palavras) > 8 else "")
+    except Exception as e:
+        print("Erro ao gerar título com Gemini:", e)
+        palavras = texto_corte.strip().split()
+        return " ".join(palavras[:8]) + ("..." if len(palavras) > 8 else "")
 
 # =========================
 # CRIA DIRETÓRIO DO VÍDEO
@@ -50,7 +88,7 @@ else:
         ydl.download([VIDEO_URL])
 
 # =========================
-# 2. TRANSCRIÇÃO COM WHISPER
+# 2. TRANSCRIÇÃO COM WHISPER NORMAL
 # =========================
 if os.path.exists(transcript_path):
     print("✅ Transcrição já existe. Carregando...")
@@ -67,33 +105,42 @@ segments = result["segments"]
 full_transcript = " ".join([s["text"] for s in segments])
 
 # =========================
-# 3. ANALISA COM OLLAMA (mudança de assunto)
+# 3. ANALISA COM GEMINI (mudança de assunto)
 # =========================
 print("🧠 Solicitando sugestões de cortes com base em mudança de assunto...")
 
 prompt = f"""
-You are a professional video editor specializing in viral short content for social media. Your task is to split the transcript of a long video into multiple short clips based on **topic changes**, such as questions, answers, stories, or explanations.
+"Olá! Tenho um canal de cortes no YouTube focado em análise política com viés marxista. Meu objetivo é criar Reels curtos (até 60 segundos) que sejam impactantes e com alto potencial de viralização, para atrair um público interessado em crítica social, economia política e teoria marxista.
 
-Requirements:
-- Each clip must have a "start" and "end" time in seconds.
-- Each clip must be at least {MIN_DURATION} seconds and at most {MAX_DURATION} seconds.
-- All clips must be sequential and **cover the entire video** without gaps or overlaps.
-- Each clip must have a descriptive title starting with its number (e.g., "1 The reason behind...").
-- Use clear, concise, lowercase titles without special characters.
-- Response must be a **pure JSON array**, no comments or text outside the JSON.
+Por favor, analise a transcrição de podcast abaixo e me sugira trechos para cortes que:
 
-Example format:
+Expliquem ou exemplifiquem conceitos marxistas (luta de classes, mais-valia, alienação, materialismo histórico, ideologia, etc.) de forma concisa.
+Critiquem o capitalismo ou sistemas neoliberais sob uma perspectiva marxista.
+Analise eventos políticos ou sociais atuais usando a lente da teoria marxista.
+Desmascarem narrativas dominantes ou "senso comum" que sirvam aos interesses do capital.
+Contenham frases de efeito, argumentos contundentes ou revelações que possam gerar debate e engajamento.
+Sejam didáticos, mas ao mesmo tempo provocativos, com o potencial de serem compartilhados e de iniciar conversas.
+
+Requisitos:
+- Cada corte deve ter "start" e "end" em segundos.
+- Cada corte deve ter pelo menos {MIN_DURATION} segundos e no máximo {MAX_DURATION} segundos.
+ 
+- Cada corte deve ter um título descritivo começando pelo número (ex: "1 O motivo de...").
+- Use títulos claros, concisos, em MAIUSCULAS e sem caracteres especiais.
+- A resposta deve ser um **array JSON puro**, sem comentários ou texto fora do JSON.
+
+Formato de exemplo:
 [
   {{
     "start": 0,
     "end": 58,
-    "description": "1 Why he left his job",
+    "description": "1 por que ele saiu do emprego",
     "platform": "shorts"
   }},
   ...
 ]
 
-Transcript:
+Transcrição:
 \"\"\"{full_transcript}\"\"\"
 """
 
@@ -101,53 +148,41 @@ cut_suggestions = []
 used_titles = set()
 
 try:
-    response = requests.post(OLLAMA_URL, json={
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-    })
+    output_raw = gemini_generate_content(prompt)
+    try:
+        json_text = re.search(r'\[\s*{.*?}\s*]', output_raw, re.DOTALL).group()
+        parsed = json.loads(json_text)
+    except Exception:
+        print("⚠️ Nenhum JSON válido encontrado na resposta do Gemini.")
+        print("Resposta bruta:", output_raw)
+        parsed = []
 
-    if response.status_code == 200:
-        output_raw = response.json()["response"]
-
+    for p in parsed:
         try:
-            json_text = re.search(r'\[\s*{.*?}\s*]', output_raw, re.DOTALL).group()
-            parsed = json.loads(json_text)
-        except Exception:
-            print("⚠️ Nenhum JSON válido encontrado na resposta do modelo.")
-            print("Resposta bruta:", output_raw)
-            parsed = []
+            start = float(p["start"])
+            end = float(p["end"])
+            desc = p.get("description", "No title").strip()
+            platform = p.get("platform", "shorts").lower()
 
-        for p in parsed:
-            try:
-                start = float(p["start"])
-                end = float(p["end"])
-                desc = p.get("description", "No title").strip()
-                platform = p.get("platform", "shorts").lower()
+            duration = end - start
+            if platform not in PLATFORMS or not (MIN_DURATION <= duration <= MAX_DURATION):
+                continue
 
-                duration = end - start
-                if platform not in PLATFORMS or not (MIN_DURATION <= duration <= MAX_DURATION):
-                    continue
+            title_key = slugify(desc)
+            if title_key in used_titles:
+                continue
 
-                title_key = slugify(desc)
-                if title_key in used_titles:
-                    continue
+            used_titles.add(title_key)
+            cut_suggestions.append((start, end, desc, platform))
+        except Exception as inner:
+            print("⚠️ Erro ao processar corte:", inner)
 
-                used_titles.add(title_key)
-                cut_suggestions.append((start, end, desc, platform))
-            except Exception as inner:
-                print("⚠️ Erro ao processar corte:", inner)
-
-        if not cut_suggestions:
-            print("⚠️ Nenhum corte válido encontrado. Verifique o modelo ou o prompt.")
-        else:
-            print(f"✅ {len(cut_suggestions)} cortes gerados com sucesso.")
+    if not cut_suggestions:
+        print("⚠️ Nenhum corte válido encontrado. Verifique o modelo ou o prompt.")
     else:
-        print("❌ Erro na requisição Ollama:", response.text)
-
+        print(f"✅ {len(cut_suggestions)} cortes gerados com sucesso.")
 except Exception as e:
     print("❌ Erro geral:", e)
-
 
 # =========================
 # 4. GERA OS CORTES COM FFMPEG + DESCRIÇÕES
@@ -156,11 +191,13 @@ except Exception as e:
 print(f"🎬 Gerando {len(cut_suggestions)} cortes e descrições...")
 
 for i, (start, end, desc, platform) in enumerate(cut_suggestions):
-    safe_title = slugify(desc)
+    corte_texto = " ".join([s["text"] for s in segments if s["end"] > start and s["start"] < end])
+    titulo_auto = gerar_titulo_gemini(corte_texto)
+    safe_title = slugify(f"{i+1} {titulo_auto}")  # Prefixo com número do corte
     duration = end - start
-    numbered_title = f"{i+1} - {desc.strip().lower()}"
-    output_video_path = os.path.join(video_folder, f"{platform}-{safe_title}.mp4")
-    output_desc_path = os.path.join(video_folder, f"{platform}-{safe_title}.txt")
+    numbered_title = f"{i+1} - {titulo_auto.strip().lower()}"
+    output_video_path = os.path.join(video_folder, f"{safe_title}.mp4")
+    output_desc_path = os.path.join(video_folder, f"{safe_title}.txt")
 
     print(f"🎞️ {platform.upper()} — {numbered_title} ({start:.1f}s → {end:.1f}s)")
 
@@ -176,3 +213,4 @@ for i, (start, end, desc, platform) in enumerate(cut_suggestions):
         f.write(description_text)
 
 print("✅ Todos os cortes e descrições foram gerados com sucesso!")
+

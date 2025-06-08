@@ -1,4 +1,3 @@
-# INSIRA SUA PRÓPRIA CHAVE DE API
 import os
 import subprocess
 import yt_dlp
@@ -10,16 +9,30 @@ import requests
 # =========================
 # CONFIGURAÇÕES
 # =========================
-VIDEO_URL = "https://www.youtube.com/watch?v=Iwe8VvZD3eQ"  # ESCOLHA O SEU VIDEO LONGO
+# Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or "AIzaSyC_TCYKvAx6qkxIXjc_Y5weu4JCDvXs6wo"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+VIDEO_URL = "https://www.youtube.com/watch?v=m7H3TQ6eq5g"  # ESCOLHA O SEU VIDEO LONGO
 OUTPUT_DIR = "videos"
 BLOCK_DURATION = 600
 PLATFORMS = ["shorts"]
 MIN_DURATION = 30
 MAX_DURATION = 300
 
-# Gemini API
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or "INSERT-YOUR-API-KEY"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+PROMPT_CORTES = f"""
+        "Olá! Tenho um canal de cortes no YouTube focado em análise política com viés marxista. Meu objetivo é criar Reels curtos (até 60 segundos) que sejam impactantes e com alto potencial de viralização, para atrair um público interessado em crítica social, economia política e teoria marxista.
+
+        Por favor, analise a transcrição de podcast abaixo e me sugira trechos para cortes que:
+
+        Expliquem ou exemplifiquem conceitos marxistas (luta de classes, mais-valia, alienação, materialismo histórico, ideologia, etc.) de forma concisa.
+        Critiquem o capitalismo ou sistemas neoliberais sob uma perspectiva marxista.
+        Analise eventos políticos ou sociais atuais usando a lente da teoria marxista.
+        Desmascarem narrativas dominantes ou "senso comum" que sirvam aos interesses do capital.
+        Contenham frases de efeito, argumentos contundentes ou revelações que possam gerar debate e engajamento.
+        Sejam didáticos, mas ao mesmo tempo provocativos, com o potencial de serem compartilhados e de iniciar conversas.
+
+    """
+
 
 # =========================
 # UTILITÁRIAS
@@ -40,15 +53,23 @@ def gemini_generate_content(prompt):
 
 def gerar_titulo_gemini(texto_corte):
     prompt = f"""
-Dado o texto a seguir, gere um título curto, chamativo e descritivo para um corte de vídeo.
-O título deve obrigatoriamente usar palavras, frases ou ideias presentes no texto do corte.
-Exemplo: se o corte fala sobre "como fazer bolo de cenoura", o título deve conter "bolo de cenoura" ou similar.
-Evite títulos genéricos como "Corte", "Vídeo", "Trecho", "Parte", "Clip" ou similares. Seja fiel ao conteúdo do texto.
+        Dado o texto a seguir, gere um título curto, chamativo e descritivo para um corte de vídeo **com foco em análise política e crítica social de viés marxista**.
 
-Texto do corte:
-\"\"\"{texto_corte}\"\"\"
-Título:
-"""
+        O título deve obrigatoriamente usar palavras, frases ou ideias presentes no texto do corte.
+        Ele deve ser **instigante, polêmico ou revelador**, buscando despertar a curiosidade e o engajamento de um público interessado em teoria e crítica marxista.
+        Priorize termos que remetam a: **luta de classes, capitalismo, ideologia, sistema, exploração, alienação, materialismo histórico, desmascaramento, burguesia, proletariado, desigualdade, crise, etc.**
+
+        Evite títulos genéricos como "Corte", "Vídeo", "Trecho", "Parte", "Clip" ou similares. Seja fiel ao conteúdo do texto, mas com um toque de análise crítica.
+
+        Exemplo:
+        Se o corte fala sobre "como o capitalismo usa a mídia para controlar a narrativa", um bom título seria: "A Mídia é uma Arma Capitalista?" ou "Como a Mídia Manipula a Classe Trabalhadora".
+
+        Sua resposta deve ser apenas o ttulo sem nenhum outro texto adicional, estou enviando essa sua resposta para um programa que vai formatar o título para o formato final.
+
+        Texto do corte:
+        \"\"\"{texto_corte}\"\"\"
+        Título:
+        """
     try:
         output = gemini_generate_content(prompt)
         for line in output.strip().split('\n'):
@@ -61,6 +82,31 @@ Título:
         print("Erro ao gerar título com Gemini:", e)
         palavras = texto_corte.strip().split()
         return " ".join(palavras[:8]) + ("..." if len(palavras) > 8 else "")
+
+def gerar_tags_virais(texto_corte):
+    prompt = f"""
+        Você é um especialista em engajamento no YouTube para vídeos de análise política com viés marxista.
+
+        Dado o texto a seguir, gere uma lista de até 10 **tags virais curtas**, separadas por vírgula e terminadas com vírgula, com foco em:
+        - Crítica ao capitalismo
+        - Conceitos marxistas
+        - Termos populares na esquerda política
+        - Palavras que gerem engajamento em plataformas como YouTube Shorts e Instagram Reels
+
+        Texto:
+        \"\"\"{texto_corte}\"\"\"
+
+        Responda com uma única linha no formato:
+        tag1, tag2, tag3, ..., tagN,
+        """
+    try:
+        tags = gemini_generate_content(prompt)
+        # Limpar e formatar a resposta
+        tags_line = tags.strip().replace("\n", "").strip(",") + ","
+        return tags_line
+    except Exception as e:
+        print("⚠️ Erro ao gerar tags:", e)
+        return "marxismo, crítica_social, capitalismo, exploração, revolução,"
 
 # =========================
 # CRIA DIRETÓRIO DO VÍDEO
@@ -110,39 +156,31 @@ full_transcript = " ".join([s["text"] for s in segments])
 print("🧠 Solicitando sugestões de cortes com base em mudança de assunto...")
 
 prompt = f"""
-"Olá! Tenho um canal de cortes no YouTube focado em análise política com viés marxista. Meu objetivo é criar Reels curtos (até 60 segundos) que sejam impactantes e com alto potencial de viralização, para atrair um público interessado em crítica social, economia política e teoria marxista.
 
-Por favor, analise a transcrição de podcast abaixo e me sugira trechos para cortes que:
+    {PROMPT_CORTES}
 
-Expliquem ou exemplifiquem conceitos marxistas (luta de classes, mais-valia, alienação, materialismo histórico, ideologia, etc.) de forma concisa.
-Critiquem o capitalismo ou sistemas neoliberais sob uma perspectiva marxista.
-Analise eventos políticos ou sociais atuais usando a lente da teoria marxista.
-Desmascarem narrativas dominantes ou "senso comum" que sirvam aos interesses do capital.
-Contenham frases de efeito, argumentos contundentes ou revelações que possam gerar debate e engajamento.
-Sejam didáticos, mas ao mesmo tempo provocativos, com o potencial de serem compartilhados e de iniciar conversas.
+    Requisitos:
+    - Cada corte deve ter "start" e "end" em segundos.
+    - Cada corte deve ter pelo menos {MIN_DURATION} segundos e no máximo {MAX_DURATION} segundos.
+    
+    - Cada corte deve ter um título descritivo começando pelo número (ex: "1 O motivo de...").
+    - Use títulos claros, concisos, em MAIUSCULAS e sem caracteres especiais.
+    - A resposta deve ser um **array JSON puro**, sem comentários ou texto fora do JSON.
 
-Requisitos:
-- Cada corte deve ter "start" e "end" em segundos.
-- Cada corte deve ter pelo menos {MIN_DURATION} segundos e no máximo {MAX_DURATION} segundos.
- 
-- Cada corte deve ter um título descritivo começando pelo número (ex: "1 O motivo de...").
-- Use títulos claros, concisos, em MAIUSCULAS e sem caracteres especiais.
-- A resposta deve ser um **array JSON puro**, sem comentários ou texto fora do JSON.
+    Formato de exemplo:
+    [
+    {{
+        "start": 0,
+        "end": 58,
+        "description": "1 por que ele saiu do emprego",
+        "platform": "shorts"
+    }},
+    ...
+    ]
 
-Formato de exemplo:
-[
-  {{
-    "start": 0,
-    "end": 58,
-    "description": "1 por que ele saiu do emprego",
-    "platform": "shorts"
-  }},
-  ...
-]
-
-Transcrição:
-\"\"\"{full_transcript}\"\"\"
-"""
+    Transcrição:
+    \"\"\"{full_transcript}\"\"\"
+    """
 
 cut_suggestions = []
 used_titles = set()
@@ -193,6 +231,7 @@ print(f"🎬 Gerando {len(cut_suggestions)} cortes e descrições...")
 for i, (start, end, desc, platform) in enumerate(cut_suggestions):
     corte_texto = " ".join([s["text"] for s in segments if s["end"] > start and s["start"] < end])
     titulo_auto = gerar_titulo_gemini(corte_texto)
+    tags = gerar_tags_virais(corte_texto)
     safe_title = slugify(f"{i+1} {titulo_auto}")  # Prefixo com número do corte
     duration = end - start
     numbered_title = f"{i+1} - {titulo_auto.strip().lower()}"
@@ -208,9 +247,38 @@ for i, (start, end, desc, platform) in enumerate(cut_suggestions):
     ], check=True)
 
     # Criação da descrição com título no topo
-    description_text = f"{numbered_title}\n{desc.strip()}\n\n📌 Extraído do canal: {channel_name}"
-    with open(output_desc_path, "w", encoding="utf-8") as f:
-        f.write(description_text)
+description_text = f"""
+    **🔥 {numbered_title} 🔥**
+
+    {desc.strip()}
+
+    ---
+
+    Se este vídeo te fez pensar, se inscreva no canal para mais análises profundas sobre política, economia e sociedade. Junte-se à nossa comunidade e venha desmascarar as narrativas dominantes!
+
+    ---
+
+    **Assista ao vídeo COMPLETO aqui:**
+    🔗 {VIDEO_URL}
+
+    ---
+
+    **Não perca nossos próximos conteúdos!**
+    🔔 Ative o sininho para receber notificações e se mantenha atualizado.
+
+    ---
+
+    **Para aprofundar sua crítica e expandir sua consciência:**
+    📌 Extraído do canal: {channel_name}
+    {tags}
+
+    ---
+
+    **Compartilhe este vídeo com quem precisa despertar!** #Marxismo #Politica #CríticaSocial #AnáliseMarxista #EconomiaPolitica #Desmascaramento
+    """
+
+with open(output_desc_path, "w", encoding="utf-8") as f:
+    f.write(description_text)
 
 print("✅ Todos os cortes e descrições foram gerados com sucesso!")
 

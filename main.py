@@ -12,15 +12,18 @@ import requests
 # Gemini API
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or "AIzaSyC_TCYKvAx6qkxIXjc_Y5weu4JCDvXs6wo"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-VIDEO_URL = "https://www.youtube.com/watch?v=m7H3TQ6eq5g"  # ESCOLHA O SEU VIDEO LONGO
+VIDEO_URL = "https://www.youtube.com/watch?v=A3xIrVH0csk&t=31s"  # ESCOLHA O SEU VIDEO LONGO
 OUTPUT_DIR = "videos"
 BLOCK_DURATION = 600
 PLATFORMS = ["shorts"]
 MIN_DURATION = 30
 MAX_DURATION = 300
 
-PROMPT_CORTES = f"""
+PROMPT_OBJETIVO = f"""  
         "Olá! Tenho um canal de cortes no YouTube focado em análise política com viés marxista. Meu objetivo é criar Reels curtos (até 60 segundos) que sejam impactantes e com alto potencial de viralização, para atrair um público interessado em crítica social, economia política e teoria marxista.
+"""
+PROMPT_CORTES = f"""
+        {PROMPT_OBJETIVO}
 
         Por favor, analise a transcrição de podcast abaixo e me sugira trechos para cortes que:
 
@@ -53,16 +56,14 @@ def gemini_generate_content(prompt):
 
 def gerar_titulo_gemini(texto_corte):
     prompt = f"""
-        Dado o texto a seguir, gere um título curto, chamativo e descritivo para um corte de vídeo **com foco em análise política e crítica social de viés marxista**.
+        {PROMPT_OBJETIVO}
+
+        Dado o texto a seguir, gere um título curto, chamativo e descritivo para um corte de vídeo **com foco nos objetivos do canal**.
 
         O título deve obrigatoriamente usar palavras, frases ou ideias presentes no texto do corte.
-        Ele deve ser **instigante, polêmico ou revelador**, buscando despertar a curiosidade e o engajamento de um público interessado em teoria e crítica marxista.
-        Priorize termos que remetam a: **luta de classes, capitalismo, ideologia, sistema, exploração, alienação, materialismo histórico, desmascaramento, burguesia, proletariado, desigualdade, crise, etc.**
+        Ele deve ser **instigante, polêmico ou revelador**, buscando despertar a curiosidade e o engajamento de um público interessado nos conteudos do meu canal.
 
         Evite títulos genéricos como "Corte", "Vídeo", "Trecho", "Parte", "Clip" ou similares. Seja fiel ao conteúdo do texto, mas com um toque de análise crítica.
-
-        Exemplo:
-        Se o corte fala sobre "como o capitalismo usa a mídia para controlar a narrativa", um bom título seria: "A Mídia é uma Arma Capitalista?" ou "Como a Mídia Manipula a Classe Trabalhadora".
 
         Sua resposta deve ser apenas o ttulo sem nenhum outro texto adicional, estou enviando essa sua resposta para um programa que vai formatar o título para o formato final.
 
@@ -180,7 +181,7 @@ prompt = f"""
 
     Transcrição:
     \"\"\"{full_transcript}\"\"\"
-    """
+"""
 
 cut_suggestions = []
 used_titles = set()
@@ -226,59 +227,91 @@ except Exception as e:
 # 4. GERA OS CORTES COM FFMPEG + DESCRIÇÕES
 # =========================
 
+if not cut_suggestions:
+    print("🚫 Não há cortes para gerar. Saindo.")
+    sys.exit(0)
+
 print(f"🎬 Gerando {len(cut_suggestions)} cortes e descrições...")
 
 for i, (start, end, desc, platform) in enumerate(cut_suggestions):
-    corte_texto = " ".join([s["text"] for s in segments if s["end"] > start and s["start"] < end])
+    corte_texto_segments = [s["text"] for s in segments if s["end"] > start and s["start"] < end]
+    corte_texto = " ".join(corte_texto_segments)
+    
+    if not corte_texto.strip():
+        print(f"⚠️ Aviso: Texto do corte {i+1} vazio. Pulando geração de descrição.")
+        continue
+
     titulo_auto = gerar_titulo_gemini(corte_texto)
     tags = gerar_tags_virais(corte_texto)
-    safe_title = slugify(f"{i+1} {titulo_auto}")  # Prefixo com número do corte
-    duration = end - start
-    numbered_title = f"{i+1} - {titulo_auto.strip().lower()}"
+    
+    safe_title = slugify(f"{i+1}_{titulo_auto}") 
+    numbered_title_display = f"{i+1} - {titulo_auto.strip()}" 
     output_video_path = os.path.join(video_folder, f"{safe_title}.mp4")
     output_desc_path = os.path.join(video_folder, f"{safe_title}.txt")
+    duration = end - start
 
-    print(f"🎞️ {platform.upper()} — {numbered_title} ({start:.1f}s → {end:.1f}s)")
+    print(f"🎞️ {platform.upper()} — {numbered_title_display} ({start:.1f}s → {end:.1f}s)")
 
-    # Criação do vídeo
-    subprocess.run([
-        "ffmpeg", "-ss", str(start), "-i", video_path, "-t", str(duration),
-        "-c", "copy", output_video_path
-    ], check=True)
+    if not os.path.exists(video_path):
+        print(f"❌ Erro: Arquivo de vídeo '{video_path}' não encontrado. O download pode ter falhado anteriormente.")
+        continue
 
+    try:
+        subprocess.run([
+            "ffmpeg",
+            "-ss", str(start),
+            "-i", video_path,
+            "-t", str(duration),
+            "-c:v", "copy",
+            "-c:a", "copy",
+            "-map", "0:v:0?", # Mapeia o stream de vídeo, se existir
+            "-map", "0:a:0?", # Mapeia o stream de áudio, se existir
+            "-max_muxing_queue_size", "1024", # Aumenta o tamanho da fila de muxing para evitar 'queue full'
+            output_video_path
+        ], check=True, capture_output=True, text=True)
+        print(f"✅ Corte '{numbered_title_display}' gerado com sucesso em '{output_video_path}'")
+
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Erro ao gerar corte {numbered_title_display} com FFmpeg:")
+        print(f"  Comando: {' '.join(e.cmd)}")
+        print(f"  Stdout: {e.stdout}")
+        print(f"  Stderr: {e.stderr}")
+        print("  Verifique se o FFmpeg está instalado corretamente e se o arquivo de vídeo original não está corrompido.")
+        continue
+
+    # AQUI ESTÁ A CORREÇÃO: MOVIDO PARA DENTRO DO LOOP
     # Criação da descrição com título no topo
-description_text = f"""
-    **🔥 {numbered_title} 🔥**
+    description_text = f"""
+**🔥 {numbered_title_display} 🔥**
 
-    {desc.strip()}
+{desc.strip()}
 
-    ---
+---
 
-    Se este vídeo te fez pensar, se inscreva no canal para mais análises profundas sobre política, economia e sociedade. Junte-se à nossa comunidade e venha desmascarar as narrativas dominantes!
+Se este vídeo te fez pensar, se inscreva no canal para mais análises profundas sobre política, economia e sociedade. Junte-se à nossa comunidade e venha desmascarar as narrativas dominantes!
 
-    ---
+---
 
-    **Assista ao vídeo COMPLETO aqui:**
-    🔗 {VIDEO_URL}
+**Assista ao vídeo COMPLETO aqui:**
+🔗 {VIDEO_URL}
 
-    ---
+---
 
-    **Não perca nossos próximos conteúdos!**
-    🔔 Ative o sininho para receber notificações e se mantenha atualizado.
+**Não perca nossos próximos conteúdos!**
+🔔 Ative o sininho para receber notificações e se mantenha atualizado.
 
-    ---
+---
 
-    **Para aprofundar sua crítica e expandir sua consciência:**
-    📌 Extraído do canal: {channel_name}
-    {tags}
+**Para aprofundar sua crítica e expandir sua consciência:**
+📌 Extraído do canal: {channel_name}
+{tags}
 
-    ---
+---
 
-    **Compartilhe este vídeo com quem precisa despertar!** #Marxismo #Politica #CríticaSocial #AnáliseMarxista #EconomiaPolitica #Desmascaramento
-    """
+**Compartilhe este vídeo com quem precisa despertar!** #Marxismo #Politica #CríticaSocial #AnáliseMarxista #EconomiaPolitica #Desmascaramento
+"""
 
-with open(output_desc_path, "w", encoding="utf-8") as f:
-    f.write(description_text)
+    with open(output_desc_path, "w", encoding="utf-8") as f:
+        f.write(description_text)
 
-print("✅ Todos os cortes e descrições foram gerados com sucesso!")
-
+print("\n✅ Todos os cortes e descrições foram gerados com sucesso!")
